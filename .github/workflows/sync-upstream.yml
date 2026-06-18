@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,6 +28,10 @@ jobs:
       - name: Fetch upstream
         run: git fetch upstream --tags
 
+      - name: Record tags before sync
+        id: before
+        run: echo "tags=$(git tag | sort | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+
       - name: Merge upstream main (fast-forward only)
         run: |
           git checkout main
@@ -36,3 +41,29 @@ jobs:
         run: |
           git push origin main
           git push origin --tags
+
+      - name: Find new tags
+        id: newtags
+        run: |
+          before="${{ steps.before.outputs.tags }}"
+          after=$(git tag | sort | tr '\n' ' ')
+          new=""
+          for t in $after; do
+            if ! echo "$before" | grep -qw "$t"; then
+              new="$t"
+            fi
+          done
+          # use the last (highest sort order) new tag, or latest tag if none new
+          if [ -z "$new" ]; then
+            new=$(git tag | sort -V | tail -1)
+          fi
+          echo "tag=$new" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch build workflow
+        if: steps.newtags.outputs.tag != ''
+        run: |
+          curl -fsSL -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/build-multiarch.yml/dispatches" \
+            -d "{\"ref\":\"refs/tags/${{ steps.newtags.outputs.tag }}\"}"

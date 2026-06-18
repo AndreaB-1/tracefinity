@@ -14,6 +14,21 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # when dispatched with a tag ref, fetch that tag
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve tag name
+        id: tag
+        run: |
+          # github.ref is refs/tags/X when triggered by tag push or dispatched with tag ref
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            # fallback: use the latest semver tag reachable from HEAD
+            echo "value=$(git tag | sort -V | tail -1)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -34,7 +49,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=ref,event=tag
+            type=raw,value=${{ steps.tag.outputs.value }}
             type=raw,value=latest
 
       - name: Build and push
